@@ -1,0 +1,9 @@
+.svn/
+*.pyc
+*.swo
+*.swp
+_build/
+.install-test/
+.pydevproject
+.project
+.settings
