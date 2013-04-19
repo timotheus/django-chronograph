@@ -3,7 +3,7 @@
 Chronograph
 ===========
 
-This project was forked from the the django-chronograph project on bitbuckt.
+This project was forked from the django-chronograph project on bitbuckt.
 
 https://bitbucket.org/wnielson/django-chronograph/
 
