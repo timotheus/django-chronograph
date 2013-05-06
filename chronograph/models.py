@@ -450,15 +450,6 @@ class Log(models.Model):
         sender = getattr(settings, 'CHRONOGRAPH_EMAIL_SENDER', '')
         host_user = getattr(settings, 'CHRONOGRAPH_EMAIL_HOST_USER', None)
 
-        if self.stderr:
-            send_mail(
-                from_email = '"%s" <%s>' % (sender, host_user),
-                subject = 'Error: %s' % self,
-                recipient_list = [ 'rowdev@ebay.com' ],
-                message = "Ouput:\n%s\nError output:\n%s" % (self.stdout, self.stderr),
-                fail_silently = True,
-            )
-
         subscribers = []
         for user in self.job.subscribers.all():
             subscribers.append('"%s" <%s>' % (user.get_full_name(), user.email))
