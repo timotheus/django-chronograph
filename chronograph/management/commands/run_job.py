@@ -1,14 +1,15 @@
 import sys
 
-from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
-from chronograph.models import Job, Log
+from chronograph.models import Job
+from chronograph.job_management import JobRunner
+
 
 class Command(BaseCommand):
     help = 'Runs a specific job. THe job will only run if it is not currently running.'
     args = "job.id"
-    
+
     def handle(self, *args, **options):
         try:
             job_id = args[0]
@@ -21,7 +22,7 @@ class Command(BaseCommand):
         except Job.DoesNotExist:
             sys.stderr.write("The requested Job does not exist.\n")
             return
-        
+
         # Run the job and wait for it to finish
-        job.handle_run()
-        
+        job_runner = JobRunner(job)
+        job_runner.run()

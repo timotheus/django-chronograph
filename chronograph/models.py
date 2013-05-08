@@ -2,11 +2,12 @@ from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.mail import send_mail
 from django.core.management import call_command
-from django.db import models
+from django.db import models, connection
 from django.template import loader, Context
 from django.utils.timesince import timeuntil
 from django.utils.translation import ungettext, ugettext, ugettext_lazy as _
 from django.utils.encoding import smart_str
+from django.conf import settings
 
 from chronograph.compatibility import dates
 from chronograph.settings import LOCK_TIMEOUT
@@ -39,6 +40,24 @@ class JobManager(models.Manager):
         """
         return self.filter(disabled=False).filter(models.Q(next_run__lte=dates.now()) | models.Q(force_run=True))
 
+    def lock_job(self, job_id):
+        """
+        Locks and returns the specified job. Sqlite is special cased
+        since it doesn't support 'select for update'.
+        """
+        job = None
+
+        # Special case for sqlite. It doesn't support "select for update"
+        # so we need to lock the db for exclusive access.
+        if settings.DATABASES['default']['ENGINE'] == 'django.db.backends.sqlite3':
+            cursor = connection.cursor()
+            cursor.execute("BEGIN EXCLUSIVE")
+            job = self.get(pk=job_id)
+        else:
+            job = self.select_for_update().get(pk=job_id)
+
+        return job
+
 # A lot of rrule stuff is from django-schedule
 freqs = (
     ("YEARLY", _("Yearly")),
@@ -50,46 +69,6 @@ freqs = (
     ("SECONDLY", _("Secondly"))
 )
 
-class JobHeartbeatThread(Thread):
-    """
-    A very simple thread that updates a temporary "lock" file every second.
-    If the ``Job`` that we are associated with gets killed off, then the file
-    will no longer be updated and after ``CHRONOGRAPH_LOCK_TIMEOUT`` seconds,
-    we assume the ``Job`` has terminated.
-
-    The heartbeat should be started with the ``start`` method and once the
-    ``Job`` is completed it should be stopped by calling the ``stop`` method.
-    """
-    daemon = True
-    halt = False
-
-    def __init__(self, *args, **kwargs):
-        self.lock_file = tempfile.NamedTemporaryFile()
-        Thread.__init__(self, *args, **kwargs)
-
-    def run(self):
-        """
-        Do not call this directly; call ``start()`` instead.
-        """
-        while not self.halt:
-            self.lock_file.seek(0)
-            self.lock_file.write(str(time.time()))
-            self.lock_file.flush()
-            time.sleep(1)
-
-    def stop(self):
-        """
-        Call this to stop the heartbeat.
-        """
-        self.halt = True
-        while self.is_alive():
-            time.sleep(.1)
-        self.lock_file.close()
-        try:
-            os.remove(self.lock_file.name)
-        except:
-            # Ignore errors trying to remove the lockfile.
-            pass
 
 class Job(models.Model):
     """
@@ -304,102 +283,6 @@ class Job(models.Model):
                 return True
         return False
 
-    def handle_run(self):
-        """
-        This method implements the code to actually run a ``Job``.  This is
-        meant to be run, primarily, by the `run_job` management command as a
-        subprocess, which can be invoked by calling this ``Job``\'s ``run``
-        method.
-        """
-        args, options = self.get_args()
-        stdout = StringIO()
-        stderr = StringIO()
-
-        # Redirect output so that we can log it if there is any
-        ostdout = sys.stdout
-        ostderr = sys.stderr
-        sys.stdout = stdout
-        sys.stderr = stderr
-        stdout_str, stderr_str = "", ""
-
-        heartbeat = JobHeartbeatThread()
-        run_date = dates.now()
-
-        self.is_running = True
-        self.lock_file = heartbeat.lock_file.name
-
-        self.save()
-
-        heartbeat.start()
-        try:
-            logger.debug("Calling command '%s'" % self.command)
-            call_command(self.command, *args, **options)
-            logger.debug("Command '%s' completed" % self.command)
-            self.last_run_successful = True
-        except Exception, e:
-            try:
-                # The command failed to run; log the exception
-                t = loader.get_template('chronograph/error_message.txt')
-                c = Context({
-                  'exception': unicode(e),
-                  'traceback': ['\n'.join(traceback.format_exception(*sys.exc_info()))]
-                })
-                stderr_str += t.render(c)
-            except Exception, e2:
-                sys.stderr.write('Caught exception (%s) while handling job exception (%s)' % (e2, e))
-            self.last_run_successful = False
-
-        # Stop the heartbeat
-        logger.debug("Stopping heartbeat")
-        heartbeat.stop()
-        heartbeat.join()
-
-        duration = dates.total_seconds((dates.now()-run_date))
-
-        self.is_running = False
-        self.lock_file = ""
-
-        # Only care about minute-level resolution
-        self.last_run = dates.make_aware(datetime(run_date.year, run_date.month, run_date.day,
-                                 run_date.hour, run_date.minute))
-
-        # If this was a forced run, then don't update the
-        # next_run date
-        if self.force_run:
-            logger.debug("Resetting 'force_run'")
-            self.force_run = False
-        else:
-            logger.debug("Determining 'next_run'")
-            while self.next_run < dates.now():
-                self.next_run = dates.make_aware(self.rrule.after(self.next_run))
-            logger.debug("'next_run = ' %s" % self.next_run)
-        self.save()
-
-        # If we got any output, save it to the log
-        stdout_str += stdout.getvalue()
-        stderr_str += stderr.getvalue()
-
-        if stderr_str:
-            # If anything was printed to stderr, consider the run
-            # unsuccessful
-            self.last_run_successful = False
-
-        # Redirect output back to default
-        sys.stdout = ostdout
-        sys.stderr = ostderr
-
-        if stdout_str or stderr_str:
-            log = Log.objects.create(
-                job = self,
-                run_date = run_date,
-                stdout = stdout_str,
-                stderr = stderr_str,
-                success = self.last_run_successful,
-                duration = duration
-            )
-
-            # Send emails
-            log.email_subscribers()
 
     def check_is_running(self):
         """

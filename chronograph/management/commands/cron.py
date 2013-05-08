@@ -1,32 +1,12 @@
-from django.core.management.base import BaseCommand
-from django import db
-
 import logging
-import os
-import sys
 import time
 
-from multiprocessing import Process
+from django.core.management.base import BaseCommand
+
+from chronograph.job_management import JobProcess
 
 logger = logging.getLogger('chronograph.commands.cron')
 
-class JobProcess(Process):
-    """
-    Each ``Job`` gets run in it's own ``Process``.
-    """
-    daemon = True
-
-    def __init__(self, job, *args, **kwargs):
-        self.job = job
-        Process.__init__(self, *args, **kwargs)
-
-    def run(self):
-        # Close database connection so it's not shared with the parent.
-        # django will reconnect automatically.
-        db.close_connection()
-
-        logger.info("Running Job: '%s'" % self.job)
-        self.job.run()
 
 class Command(BaseCommand):
     help = 'Runs all jobs that are due.'
@@ -36,11 +16,9 @@ class Command(BaseCommand):
 
         procs = []
         for job in Job.objects.due():
-            if not job.check_is_running():
-                # Only run the Job if it isn't already running
-                proc = JobProcess(job)
-                proc.start()
-                procs.append(proc)
+            proc = JobProcess(job)
+            proc.start()
+            procs.append(proc)
 
         logger.info("%d Jobs are due" % len(procs))
 
@@ -51,4 +29,3 @@ class Command(BaseCommand):
                     procs.pop(i)
                     break
                 time.sleep(.1)
-
