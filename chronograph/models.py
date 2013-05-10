@@ -101,6 +101,7 @@ class Job(models.Model):
                                          limit_choices_to={'is_staff':True})
     lock_file = models.CharField(max_length=255, blank=True, editable=False)
     force_run = models.BooleanField(default=False)
+    only_email_on_error = models.BooleanField(default=True)
 
     objects = JobManager()
 

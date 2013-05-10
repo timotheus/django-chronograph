@@ -182,7 +182,9 @@ class JobRunner(object):
                 )
 
                 # Send emails
-                log.email_subscribers()
+                if (job.only_email_on_error and stderr_str) or (not job.only_email_on_error):
+                    print 'emailing'
+                    log.email_subscribers()
 
 
 class JobProcess(Process):
