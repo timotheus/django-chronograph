@@ -19,7 +19,8 @@ from chronograph.models import Job, Log
 from datetime import datetime
 
 class HTMLWidget(forms.Widget):
-    def __init__(self,rel=None, attrs=None):
+    def __init__(self,rel=None, attrs=None, escape=False):
+        self.escape = escape
         self.rel = rel
         super(HTMLWidget, self).__init__(attrs)
 
@@ -31,7 +32,8 @@ class HTMLWidget(forms.Widget):
             value = "<a href='%s'>%s</a>" % (related_url, escape(obj))
 
         final_attrs = self.build_attrs(attrs, name=name)
-        return mark_safe("<div%s>%s</div>" % (flatatt(final_attrs), linebreaks(value)))
+        final_value = escape(value) if self.escape else value
+        return mark_safe("<div%s>%s</div>" % (flatatt(final_attrs), linebreaks(final_value)))
 
 class JobAdmin(admin.ModelAdmin):
     actions = ['run_selected_jobs']
@@ -221,7 +223,7 @@ class LogAdmin(admin.ModelAdmin):
         request = kwargs.pop("request", None)
 
         if isinstance(db_field, models.TextField):
-            kwargs['widget'] = HTMLWidget()
+            kwargs['widget'] = HTMLWidget(escape=True)
             return db_field.formfield(**kwargs)
 
         if isinstance(db_field, models.ForeignKey):
