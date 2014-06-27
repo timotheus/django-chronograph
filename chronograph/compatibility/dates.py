@@ -58,11 +58,11 @@ def local_dateformat(dt):
 
 def localtime(dt):
     if timezone:
-        return timezone.localtime(dt)
+        return timezone.localtime(make_aware(dt, tz='current'))
     return dt
 
-def total_seconds(td): 
+def total_seconds(td):
     try:
         return td.total_seconds()
-    except AttributeError:    
+    except AttributeError:
         return (td.microseconds + (td.seconds + td.days * 24 * 3600) * 1e6) / 1e6
